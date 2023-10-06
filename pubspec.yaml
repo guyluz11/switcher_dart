@@ -1,0 +1,20 @@
+name: switcher_dart
+description: Control Switcher smart home accessories directly through LAN. Search, listen to changes and send commends to change state of devices.
+version: 1.0.0
+repository: https://github.com/CyBear-Jinni/switcher_dart
+homepage: https://switcher.co.il/
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+
+# Add regular dependencies here.
+dependencies:
+  # Collection of cyclic redundancy check (CRC) routines as Dart converters.
+  crclib: ^3.0.0
+  # Small, easy to use and extensible logger which prints beautiful logs.
+  logger: ^2.0.2+1
+
+dev_dependencies:
+  lints: ^2.1.1
+  test: ^1.24.7
