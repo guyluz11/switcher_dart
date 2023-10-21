@@ -60,7 +60,7 @@ class SwitcherApiObject {
     if (sDeviceType == SwitcherDevicesTypes.switcherRunner ||
         sDeviceType == SwitcherDevicesTypes.switcherRunnerMini) {
       if (!isSwitcherMessageNew(data, hexSeparatedLetters)) {
-        logger.v('Not new switcher device!');
+        logger.t('Not new switcher device!');
       }
 
       final SwitcherDeviceDirection switcherDeviceDirection =
@@ -79,7 +79,7 @@ class SwitcherApiObject {
     }
 
     if (!isSwitcherMessage(data, hexSeparatedLetters)) {
-      logger.v('Not old switcher device!');
+      logger.t('Not old switcher device!');
     }
 
     final SwitcherDeviceState switcherDeviceState =
@@ -216,7 +216,7 @@ class SwitcherApiObject {
   Future<void> stopBlinds() async {
     if (deviceType != SwitcherDevicesTypes.switcherRunner &&
         deviceType != SwitcherDevicesTypes.switcherRunnerMini) {
-      logger.v('Stop blinds support only for blinds');
+      logger.t('Stop blinds support only for blinds');
       return;
     }
 
@@ -242,7 +242,7 @@ class SwitcherApiObject {
   Future<void> setPosition({int pos = 0}) async {
     if (deviceType != SwitcherDevicesTypes.switcherRunner &&
         deviceType != SwitcherDevicesTypes.switcherRunnerMini) {
-      logger.v('Set position support only blinds');
+      logger.t('Set position support only blinds');
       return;
     }
 
