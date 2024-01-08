@@ -14,7 +14,7 @@ class SwitcherDiscover {
         switcherUdpPort,
       );
 
-      await for (final event in socket20002) {
+      await for (final _ in socket20002) {
         final Datagram? datagram = socket20002.receive();
         if (datagram == null) continue;
         final SwitcherApiObject switcherApiObject =
@@ -35,7 +35,7 @@ class SwitcherDiscover {
         switcherUdpPort2,
       );
 
-      await for (final event in socket20003) {
+      await for (final _ in socket20003) {
         final Datagram? datagram = socket20003.receive();
         if (datagram == null) continue;
         final SwitcherApiObject switcherApiObject =

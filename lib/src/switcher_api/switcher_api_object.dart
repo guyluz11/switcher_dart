@@ -3,9 +3,11 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crclib/crclib.dart';
+import 'package:switcher_dart/src/switcher_api/devices/switcher_on_off_abstract.dart';
+import 'package:switcher_dart/src/switcher_api/devices/switcher_runner.dart';
 import 'package:switcher_dart/src/utils.dart';
 
-class SwitcherApiObject {
+abstract class SwitcherApiObject {
   SwitcherApiObject({
     required this.deviceType,
     required this.deviceId,
@@ -13,15 +15,13 @@ class SwitcherApiObject {
     required this.switcherName,
     required this.powerConsumption,
     required this.macAddress,
-    this.deviceState = SwitcherDeviceState.cantGetState,
-    this.deviceDirection = SwitcherDeviceDirection.cantGetState,
     this.devicePass = '00000000',
     this.phoneId = '0000',
-    this.statusSocket,
-    this.log,
     this.port = switcherTcpPort,
+    this.statusSocket,
     this.lastShutdownRemainingSecondsValue,
     this.remainingTimeForExecution,
+    this.log,
   });
 
   factory SwitcherApiObject.createWithBytes(Datagram datagram) {
@@ -42,7 +42,7 @@ class SwitcherApiObject {
       logger.w('Not a switcher message arrived to here');
     }
 
-    final SwitcherDevicesTypes sDeviceType = getDeviceType(messageBuffer);
+    final SwitcherDevicesTypes type = getDeviceType(messageBuffer);
     final String deviceId = extractDeviceId(hexSeparatedLetters);
     // final String switcherIp = extractIpAddr(hexSeparatedLetters);
     final String switcherIp = datagram.address.address;
@@ -52,57 +52,61 @@ class SwitcherApiObject {
 
     final String switcherName = extractDeviceName(data);
 
-    final String getRemaining =
+    final String remainingTimeForExecution =
         extractRemainingTimeForExecution(hexSeparatedLetters);
     final String lastShutdownRemainingSecondsValue =
         extractShutdownRemainingSeconds(hexSeparatedLetters);
 
-    if (sDeviceType == SwitcherDevicesTypes.switcherRunner ||
-        sDeviceType == SwitcherDevicesTypes.switcherRunnerMini) {
-      if (!isSwitcherMessageNew(data, hexSeparatedLetters)) {
-        logger.v('Not new switcher device!');
-      }
+    switch (type) {
+      case SwitcherDevicesTypes.notRecognized:
+        throw 'Unrecognized switcher device';
+      case SwitcherDevicesTypes.switcherMini:
+      case SwitcherDevicesTypes.switcherPowerPlug:
+      case SwitcherDevicesTypes.switcherTouch:
+      case SwitcherDevicesTypes.switcherV2Esp:
+      case SwitcherDevicesTypes.switcherV2qualcomm:
+      case SwitcherDevicesTypes.switcherV4:
+        SwitcherOnOffAbstract.fromHexSeparatedLetters(
+            hexSeparatedLetters: hexSeparatedLetters,
+            type: type,
+            deviceId: deviceId,
+            switcherIp: switcherIp,
+            switcherName: switcherName,
+            macAddress: switcherMac,
+            powerConsumption: powerConsumption,
+            port: switcherTcpPort2,
+            lastShutdownRemainingSecondsValue:
+                lastShutdownRemainingSecondsValue,
+            remainingTimeForExecution: remainingTimeForExecution);
 
-      final SwitcherDeviceDirection switcherDeviceDirection =
-          extractSwitchDirection(hexSeparatedLetters);
-
-      return SwitcherApiObject(
-        deviceType: sDeviceType,
-        deviceId: deviceId,
-        switcherIp: switcherIp,
-        deviceDirection: switcherDeviceDirection,
-        switcherName: switcherName,
-        macAddress: switcherMac,
-        powerConsumption: powerConsumption,
-        port: switcherTcpPort2,
-      );
+      case SwitcherDevicesTypes.switcherBreeze:
+      // TODO: Add breeze
+      case SwitcherDevicesTypes.switcherRunner:
+      case SwitcherDevicesTypes.switcherRunnerMini:
+        return SwitcherRunner.fromHexSeparatedLetters(
+          hexSeparatedLetters: hexSeparatedLetters,
+          deviceType: type,
+          deviceId: deviceId,
+          switcherIp: switcherIp,
+          switcherName: switcherName,
+          macAddress: switcherMac,
+          powerConsumption: powerConsumption,
+          port: switcherTcpPort2,
+          lastShutdownRemainingSecondsValue: lastShutdownRemainingSecondsValue,
+          remainingTimeForExecution: remainingTimeForExecution,
+        );
     }
 
-    if (!isSwitcherMessage(data, hexSeparatedLetters)) {
-      logger.v('Not old switcher device!');
-    }
+    // if (!isSwitcherMessage(data, hexSeparatedLetters)) {
+    //   logger.t('Not old switcher device!');
+    // }
 
-    final SwitcherDeviceState switcherDeviceState =
-        extractSwitchState(hexSeparatedLetters);
-
-    return SwitcherApiObject(
-      deviceType: sDeviceType,
-      deviceId: deviceId,
-      switcherIp: switcherIp,
-      deviceState: switcherDeviceState,
-      switcherName: switcherName,
-      macAddress: switcherMac,
-      lastShutdownRemainingSecondsValue: lastShutdownRemainingSecondsValue,
-      powerConsumption: powerConsumption,
-      remainingTimeForExecution: getRemaining,
-    );
+    throw 'Switcher device type isn\'t supported';
   }
 
   String deviceId;
   String switcherIp;
   SwitcherDevicesTypes deviceType;
-  SwitcherDeviceState deviceState;
-  SwitcherDeviceDirection deviceDirection;
   int port;
   String switcherName;
   String phoneId;
@@ -114,7 +118,7 @@ class SwitcherApiObject {
   String? statusSocket;
   String? lastShutdownRemainingSecondsValue;
 
-  Socket? _socket;
+  Socket? socket;
 
   String? pSession;
 
@@ -131,9 +135,6 @@ class SwitcherApiObject {
 
   static const switcherUdpIp = '0.0.0.0';
   static const switcherUdpPort = 20002;
-
-  static const offValue = '0';
-  static const onValue = '1';
 
   static bool isSwitcherMessage(
     Uint8List data,
@@ -156,127 +157,31 @@ class SwitcherApiObject {
   static SwitcherDevicesTypes getDeviceType(List<String> messageBuffer) {
     SwitcherDevicesTypes sDevicesTypes = SwitcherDevicesTypes.notRecognized;
 
-    final String hexModel = messageBuffer.sublist(75, 76)[0];
+    final String hexModel = messageBuffer.sublist(74, 76).join();
 
-    if (hexModel == '0f') {
+    if (hexModel == '030f') {
       sDevicesTypes = SwitcherDevicesTypes.switcherMini;
-    } else if (hexModel == 'a8') {
+    } else if (hexModel == '01a8') {
       sDevicesTypes = SwitcherDevicesTypes.switcherPowerPlug;
-    } else if (hexModel == '0b') {
+    } else if (hexModel == '030b') {
       sDevicesTypes = SwitcherDevicesTypes.switcherTouch;
-    } else if (hexModel == 'a7') {
+    } else if (hexModel == '01a7') {
       sDevicesTypes = SwitcherDevicesTypes.switcherV2Esp;
-    } else if (hexModel == 'a1') {
+    } else if (hexModel == '01a1') {
       sDevicesTypes = SwitcherDevicesTypes.switcherV2qualcomm;
-    } else if (hexModel == '17') {
+    } else if (hexModel == '0317') {
       sDevicesTypes = SwitcherDevicesTypes.switcherV4;
-    } else if (hexModel == '01') {
+    } else if (hexModel == '0e01') {
+      sDevicesTypes = SwitcherDevicesTypes.switcherBreeze;
+    } else if (hexModel == '0c01') {
       sDevicesTypes = SwitcherDevicesTypes.switcherRunner;
-    } else if (hexModel == '02') {
+    } else if (hexModel == '0c02') {
       sDevicesTypes = SwitcherDevicesTypes.switcherRunnerMini;
     } else {
       logger.w('New device type? hexModel:$hexModel');
     }
 
     return sDevicesTypes;
-  }
-
-  Future<void> turnOn({int duration = 0}) async {
-    final String offCommand = '${onValue}00${_timerValue(duration)}';
-
-    await _runPowerCommand(offCommand);
-  }
-
-  Future<void> turnOff() async {
-    const String offCommand = '${offValue}0000000000';
-    await _runPowerCommand(offCommand);
-  }
-
-  Future<void> _runPowerCommand(String commandType) async {
-    pSession = await _login();
-    if (pSession == 'B') {
-      logger.e('Switcher run power command error');
-      return;
-    }
-    var data =
-        'fef05d0002320102${pSession!}340001000000000000000000${_getTimeStamp()}'
-        '00000000000000000000f0fe${deviceId}00${phoneId}0000$devicePass'
-        '000000000000000000000000000000000000000000000000000000000106000'
-        '$commandType';
-
-    data = await _crcSignFullPacketComKey(data, pKey);
-
-    _socket = await getSocket();
-    _socket!.add(hexStringToDecimalList(data));
-    await _socket?.close();
-    _socket = null;
-  }
-
-  /// Stops the blinds
-  Future<void> stopBlinds() async {
-    if (deviceType != SwitcherDevicesTypes.switcherRunner &&
-        deviceType != SwitcherDevicesTypes.switcherRunnerMini) {
-      logger.v('Stop blinds support only for blinds');
-      return;
-    }
-
-    pSession = await _login2();
-    if (pSession == 'B') {
-      logger.e('Switcher run position command error');
-      return;
-    }
-    var data =
-        'fef0590003050102${pSession!}232301000000000000000000${_getTimeStamp()}'
-        '00000000000000000000f0fe${deviceId}00${phoneId}0000$devicePass'
-        '000000000000000000000000000000000000000000000000000000370202000000';
-
-    data = await _crcSignFullPacketComKey(data, pKey);
-
-    _socket = await getSocket();
-    _socket!.add(hexStringToDecimalList(data));
-    await _socket?.close();
-    _socket = null;
-  }
-
-  /// Sets the position of the blinds, 0 is down 100 is up
-  Future<void> setPosition({int pos = 0}) async {
-    if (deviceType != SwitcherDevicesTypes.switcherRunner &&
-        deviceType != SwitcherDevicesTypes.switcherRunnerMini) {
-      logger.v('Set position support only blinds');
-      return;
-    }
-
-    final String positionCommand = _getHexPos(pos: pos);
-    _runPositionCommand(positionCommand);
-  }
-
-  String _getHexPos({int pos = 0}) {
-    String posAsHex = intListToHex([pos]).join();
-    if (posAsHex.length < 2) {
-      posAsHex = '0$posAsHex';
-    }
-    return posAsHex;
-  }
-
-  Future<void> _runPositionCommand(String positionCommand) async {
-    // final int pos = int.parse(positionCommand, radix: 16);
-    pSession = await _login2();
-    if (pSession == 'B') {
-      logger.e('Switcher run position command error');
-      return;
-    }
-    var data =
-        'fef0580003050102${pSession!}290401000000000000000000${_getTimeStamp()}'
-        '00000000000000000000f0fe${deviceId}00${phoneId}0000$devicePass'
-        '00000000000000000000000000000000000000000000000000000037010100'
-        '$positionCommand';
-
-    data = await _crcSignFullPacketComKey(data, pKey);
-
-    _socket = await getSocket();
-    _socket!.add(hexStringToDecimalList(data));
-    await _socket?.close();
-    _socket = null;
   }
 
   /// Used for sending actions to the device
@@ -288,26 +193,26 @@ class SwitcherApiObject {
   /// Returns a tuple of hex timestamp,
   /// session id and an instance of SwitcherStateResponse
   Future<String> _getFullState() async {
-    return _login();
+    return login();
   }
 
   /// Used for sending the login packet to the device.
-  Future<String> _login() async {
+  Future<String> login() async {
     try {
       String data = 'fef052000232a100${pSessionValue}340001000000000000000000'
-          '${_getTimeStamp()}00000000000000000000f0fe1c00${phoneId}0000'
+          '${getTimeStamp()}00000000000000000000f0fe1c00${phoneId}0000'
           '$devicePass'
           '00000000000000000000000000000000000000000000000000000000';
 
-      data = await _crcSignFullPacketComKey(data, pKey);
-      _socket = await getSocket();
-      if (_socket == null) {
+      data = await crcSignFullPacketComKey(data, pKey);
+      socket = await getSocket();
+      if (socket == null) {
         throw 'Error';
       }
 
-      _socket!.add(hexStringToDecimalList(data));
+      socket!.add(hexStringToDecimalList(data));
 
-      final Uint8List firstData = await _socket!.first;
+      final Uint8List firstData = await socket!.first;
       final String resultSession =
           substrLikeInJavaScript(intListToHex(firstData).join(), 16, 8);
 
@@ -319,36 +224,7 @@ class SwitcherApiObject {
     return pSession!;
   }
 
-  /// Used for sending the login packet to switcher runner.
-  Future<String> _login2() async {
-    // if (pSession != null) return pSession!;
-
-    try {
-      String data = 'fef030000305a600${pSessionValue}ff0301000000$phoneId'
-          '00000000${_getTimeStamp()}00000000000000000000f0fe${deviceId}00';
-
-      data = await _crcSignFullPacketComKey(data, pKey);
-      _socket = await getSocket();
-      if (_socket == null) {
-        throw 'Error';
-      }
-
-      _socket!.add(hexStringToDecimalList(data));
-
-      final Uint8List firstData = await _socket!.first;
-
-      final String resultSession =
-          substrLikeInJavaScript(intListToHex(firstData).join(), 16, 8);
-
-      return resultSession;
-    } catch (error) {
-      logger.e('login2 failed due to an error\n$error');
-      pSession = 'B';
-    }
-    return pSession!;
-  }
-
-  static Future<String> _crcSignFullPacketComKey(
+  Future<String> crcSignFullPacketComKey(
     String pData,
     String pKey,
   ) async {
@@ -384,7 +260,7 @@ class SwitcherApiObject {
         substrLikeInJavaScript(crc, 4, 2);
   }
 
-  static String _getTimeStamp() {
+  String getTimeStamp() {
     final int timeInSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
     final List<int> timeInBytes = packLittleEndian(timeInSeconds);
@@ -393,7 +269,7 @@ class SwitcherApiObject {
   }
 
   /// Same as Buffer.from(value, 'hex') in JavaScript
-  static List<int> hexStringToDecimalList(String hex) {
+  List<int> hexStringToDecimalList(String hex) {
     final List<int> decimalIntList = [];
     String twoNumbers = '';
 
@@ -570,24 +446,6 @@ class SwitcherApiObject {
     return hexSeparatedLetters.sublist(36, 42).join();
   }
 
-  static SwitcherDeviceState extractSwitchState(
-    List<String> hexSeparatedLetters,
-  ) {
-    SwitcherDeviceState switcherDeviceState = SwitcherDeviceState.cantGetState;
-
-    final String hexModel =
-        substrLikeInJavaScript(hexSeparatedLetters.join(), 266, 4);
-
-    if (hexModel == '0100') {
-      switcherDeviceState = SwitcherDeviceState.on;
-    } else if (hexModel == '0000') {
-      switcherDeviceState = SwitcherDeviceState.off;
-    } else {
-      logger.w('Switcher state is not recognized: $hexModel');
-    }
-    return switcherDeviceState;
-  }
-
   static SwitcherDeviceDirection extractSwitchDirection(
     List<String> hexSeparatedLetters,
   ) {
@@ -610,15 +468,15 @@ class SwitcherApiObject {
   }
 
   Future<Socket> getSocket() async {
-    if (_socket != null) {
-      return _socket!;
+    if (socket != null) {
+      return socket!;
     }
 
     try {
       final Socket socket = await _connect(switcherIp, port);
       return socket;
     } catch (e) {
-      _socket = null;
+      socket = null;
       logger.e('Error connecting to socket for switcher device: $e');
       rethrow;
     }
@@ -628,7 +486,7 @@ class SwitcherApiObject {
     return Socket.connect(ip, port);
   }
 
-  String _timerValue(int minutes) {
+  String timerValue(int minutes) {
     if (minutes == 0) {
       // when duration set to zero, Switcher sends regular on command
       return '00000000';
@@ -660,19 +518,20 @@ enum SwitcherDeviceDirection {
 /// Enum class representing the device's state.
 enum SwitcherDeviceState {
   cantGetState,
-  on, // '0100'
-  off, // '0000'
+  on, // "01", "on"
+  off, // "00", "off"
 }
 
 /// Enum for relaying the type of the switcher devices.
 enum SwitcherDevicesTypes {
   notRecognized,
-  switcherMini, // MINI = "Switcher Mini", "0f", DeviceCategory.WATER_HEATER
-  switcherPowerPlug, // POWER_PLUG = "Switcher Power Plug", "a8", DeviceCategory.POWER_PLUG
-  switcherTouch, // TOUCH = "Switcher Touch", "0b", DeviceCategory.WATER_HEATER
-  switcherV2Esp, // V2_ESP = "Switcher V2 (esp)", "a7", DeviceCategory.WATER_HEATER
-  switcherV2qualcomm, // V2_QCA = "Switcher V2 (qualcomm)", "a1", DeviceCategory.WATER_HEATER
-  switcherV4, // V4 = "Switcher V4", "17", DeviceCategory.WATER_HEATER
-  switcherRunner, // runner = "Switcher Runner", "01", DeviceCategory.Blinds
-  switcherRunnerMini, // runner_mini = "Switcher Runner Mini", "02", DeviceCategory.Blinds
+  switcherMini, // MINI = "Switcher Mini", "030f", 1, DeviceCategory.WATER_HEATER
+  switcherPowerPlug, // POWER_PLUG = "Switcher Power Plug", "01a8", 1, DeviceCategory.POWER_PLUG
+  switcherTouch, // TOUCH = "Switcher Touch", "030b", 1, DeviceCategory.WATER_HEATER
+  switcherV2Esp, // V2_ESP = "Switcher V2 (esp)", "01a7", 1, DeviceCategory.WATER_HEATER
+  switcherV2qualcomm, // V2_QCA = "Switcher V2 (qualcomm)", "01a1", 1, DeviceCategory.WATER_HEATER
+  switcherV4, // V4 = "Switcher V4", "0317", 1, DeviceCategory.WATER_HEATER
+  switcherBreeze, // BREEZE = "Switcher Breeze", "0e01", 2, DeviceCategory.THERMOSTAT
+  switcherRunner, // RUNNER = "Switcher Runner", "0c01", 2, DeviceCategory.SHUTTER
+  switcherRunnerMini, // RUNNER_MINI = "Switcher Runner Mini", "0c02", 2, DeviceCategory.SHUTTER
 }
