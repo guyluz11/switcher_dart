@@ -25,83 +25,61 @@ abstract class SwitcherApiObject {
   });
 
   factory SwitcherApiObject.createWithBytes(Datagram datagram) {
-    final Uint8List data = datagram.data;
+    final Uint8List message = datagram.data;
 
-    final List<String> messageBuffer = intListToHex(data);
-
-    final List<String> hexSeparatedLetters = [];
-
-    for (final String hexValue in messageBuffer) {
-      for (final element in hexValue.runes) {
-        hexSeparatedLetters.add(String.fromCharCode(element));
-      }
+    if (!isSwitcherOriginator(message)) {
+      loggerSwitcher.w('Not a switcher message arrived to here');
     }
 
-    if (!isSwitcherMessage(data, hexSeparatedLetters) &&
-        !isSwitcherMessageNew(data, hexSeparatedLetters)) {
-      logger.w('Not a switcher message arrived to here');
-    }
+    final SwitcherDevicesTypes type = getDeviceType(message);
+    final String deviceId = extractDeviceId(message);
 
-    final SwitcherDevicesTypes type = getDeviceType(messageBuffer);
-    final String deviceId = extractDeviceId(hexSeparatedLetters);
-    // final String switcherIp = extractIpAddr(hexSeparatedLetters);
     final String switcherIp = datagram.address.address;
-    final String switcherMac = extractMac(hexSeparatedLetters);
-    final String powerConsumption =
-        extractPowerConsumption(hexSeparatedLetters);
+    final String switcherMac = getMac(message);
+    final int powerConsumption = extractPowerConsumption(message);
 
-    final String switcherName = extractDeviceName(data);
+    final String switcherName = extractDeviceName(message);
 
-    final String remainingTimeForExecution =
-        extractRemainingTimeForExecution(hexSeparatedLetters);
-    final String lastShutdownRemainingSecondsValue =
-        extractShutdownRemainingSeconds(hexSeparatedLetters);
+    final String remainingTimeForExecution = getRemaining(message);
+    final String lastShutdownRemainingSecondsValue = getAutoShutdown(message);
 
     switch (type) {
-      case SwitcherDevicesTypes.notRecognized:
-        throw 'Unrecognized switcher device';
       case SwitcherDevicesTypes.switcherMini:
       case SwitcherDevicesTypes.switcherPowerPlug:
       case SwitcherDevicesTypes.switcherTouch:
       case SwitcherDevicesTypes.switcherV2Esp:
       case SwitcherDevicesTypes.switcherV2qualcomm:
       case SwitcherDevicesTypes.switcherV4:
-        SwitcherOnOffAbstract.fromHexSeparatedLetters(
-            hexSeparatedLetters: hexSeparatedLetters,
-            type: type,
-            deviceId: deviceId,
-            switcherIp: switcherIp,
-            switcherName: switcherName,
-            macAddress: switcherMac,
-            powerConsumption: powerConsumption,
-            port: switcherTcpPort2,
-            lastShutdownRemainingSecondsValue:
-                lastShutdownRemainingSecondsValue,
-            remainingTimeForExecution: remainingTimeForExecution);
-
       case SwitcherDevicesTypes.switcherBreeze:
-      // TODO: Add breeze
+        return SwitcherOnOffAbstract.fromHexSeparatedLetters(
+          type: type,
+          deviceId: deviceId,
+          switcherIp: switcherIp,
+          switcherName: switcherName,
+          macAddress: switcherMac,
+          powerConsumption: powerConsumption,
+          lastShutdownRemainingSecondsValue: lastShutdownRemainingSecondsValue,
+          remainingTimeForExecution: remainingTimeForExecution,
+          message: message,
+        );
+
       case SwitcherDevicesTypes.switcherRunner:
       case SwitcherDevicesTypes.switcherRunnerMini:
         return SwitcherRunner.fromHexSeparatedLetters(
-          hexSeparatedLetters: hexSeparatedLetters,
+          message: message,
           deviceType: type,
           deviceId: deviceId,
           switcherIp: switcherIp,
           switcherName: switcherName,
           macAddress: switcherMac,
           powerConsumption: powerConsumption,
-          port: switcherTcpPort2,
           lastShutdownRemainingSecondsValue: lastShutdownRemainingSecondsValue,
           remainingTimeForExecution: remainingTimeForExecution,
         );
+      case SwitcherDevicesTypes.notRecognized:
     }
 
-    // if (!isSwitcherMessage(data, hexSeparatedLetters)) {
-    //   logger.t('Not old switcher device!');
-    // }
-
-    throw 'Switcher device type isn\'t supported';
+    throw 'Switcher device type isn\'t supported name $switcherName id $deviceId ip $switcherIp ';
   }
 
   String deviceId;
@@ -110,7 +88,7 @@ abstract class SwitcherApiObject {
   int port;
   String switcherName;
   String phoneId;
-  String powerConsumption;
+  int powerConsumption;
   String devicePass;
   String macAddress;
   String? remainingTimeForExecution;
@@ -136,52 +114,27 @@ abstract class SwitcherApiObject {
   static const switcherUdpIp = '0.0.0.0';
   static const switcherUdpPort = 20002;
 
-  static bool isSwitcherMessage(
-    Uint8List data,
-    List<String> hexSeparatedLetters,
-  ) {
-    // Verify the broadcast message had originated from a switcher device.
-    return hexSeparatedLetters.sublist(0, 4).join() == 'fef0' &&
-        data.length == 165;
+  static bool isSwitcherOriginator(Uint8List message) {
+    // Convert the start of the message to a hex string
+    String hexStart = bytesToHex(message.sublist(0, 2));
+
+    // Check if the hex string matches the specific value and length conditions
+    return hexStart == "fef0" &&
+        (message.length == 165 ||
+            message.length == 168 ||
+            message.length == 159);
   }
 
-  static bool isSwitcherMessageNew(
-    Uint8List data,
-    List<String> hexSeparatedLetters,
-  ) {
-    // Verify the broadcast message had originated from a switcher device.
-    return hexSeparatedLetters.sublist(0, 4).join() == 'fef0' &&
-        data.length == 159;
-  }
+  // Helper method to convert bytes to hex string
+  static String bytesToHex(Uint8List bytes) =>
+      bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
 
-  static SwitcherDevicesTypes getDeviceType(List<String> messageBuffer) {
-    SwitcherDevicesTypes sDevicesTypes = SwitcherDevicesTypes.notRecognized;
-
-    final String hexModel = messageBuffer.sublist(74, 76).join();
-
-    if (hexModel == '030f') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherMini;
-    } else if (hexModel == '01a8') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherPowerPlug;
-    } else if (hexModel == '030b') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherTouch;
-    } else if (hexModel == '01a7') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherV2Esp;
-    } else if (hexModel == '01a1') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherV2qualcomm;
-    } else if (hexModel == '0317') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherV4;
-    } else if (hexModel == '0e01') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherBreeze;
-    } else if (hexModel == '0c01') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherRunner;
-    } else if (hexModel == '0c02') {
-      sDevicesTypes = SwitcherDevicesTypes.switcherRunnerMini;
-    } else {
-      logger.w('New device type? hexModel:$hexModel');
-    }
-
-    return sDevicesTypes;
+  static SwitcherDevicesTypes getDeviceType(Uint8List message) {
+    String hexModel = bytesToHex(message.sublist(74, 76));
+    return SwitcherDevicesTypes.values.firstWhere(
+      (type) => type.hexRep == hexModel,
+      orElse: () => SwitcherDevicesTypes.switcherMini, // Define a default case
+    );
   }
 
   /// Used for sending actions to the device
@@ -218,7 +171,37 @@ abstract class SwitcherApiObject {
 
       return resultSession;
     } catch (error) {
-      logger.e('Switcher login failed due to an error\n$error');
+      loggerSwitcher.e('Switcher login failed due to an error\n$error');
+      pSession = 'B';
+    }
+    return pSession!;
+  }
+
+  /// Used for sending the login packet to switcher runner.
+  Future<String> login2() async {
+    // if (pSession != null) return pSession!;
+
+    try {
+      String data =
+          'fef030000305a600${SwitcherApiObject.pSessionValue}ff0301000000$phoneId'
+          '00000000${getTimeStamp()}00000000000000000000f0fe${deviceId}00';
+
+      data = await crcSignFullPacketComKey(data, SwitcherApiObject.pKey);
+      socket = await getSocket();
+      if (socket == null) {
+        throw 'Error';
+      }
+
+      socket!.add(hexStringToDecimalList(data));
+
+      final Uint8List firstData = await socket!.first;
+
+      final String resultSession = SwitcherApiObject.substrLikeInJavaScript(
+          SwitcherApiObject.intListToHex(firstData).join(), 16, 8);
+
+      return resultSession;
+    } catch (error) {
+      loggerSwitcher.e('login2 failed due to an error\n$error');
       pSession = 'B';
     }
     return pSession!;
@@ -356,30 +339,32 @@ abstract class SwitcherApiObject {
     return ipAddrInt.toString();
   }
 
-  static String extractPowerConsumption(List<String> hexSeparatedLetters) {
-    // final List<String> hexPowerConsumption =
-    //     hexSeparatedLetters.sublist(270, 278);
-    // TODO: fix this method does not return number, hexPowerConsumption.join()
-    //  return the value 64000000
-    // return hexPowerConsumption.join();
-    return '0';
+  static int extractPowerConsumption(Uint8List message) {
+    // Convert the relevant part of the message to a hex string
+    String hexPowerConsumption = bytesToHex(message).substring(270, 278);
+
+    // Rearrange the hex string and convert it to an integer
+    return int.parse(
+        hexPowerConsumption.substring(2, 4) +
+            hexPowerConsumption.substring(0, 2),
+        radix: 16);
   }
 
-  /// Extract the time remains for the current execution.
-  static String extractRemainingTimeForExecution(
-    List<String> hexSeparatedLetters,
-  ) {
-    final List<String> hexPowerConsumption =
-        hexSeparatedLetters.sublist(294, 302);
-    try {
-      final int sum = int.parse(hexPowerConsumption.sublist(6, 8).join()) +
-          int.parse(hexPowerConsumption.sublist(4, 6).join()) +
-          int.parse(hexPowerConsumption.sublist(2, 4).join()) +
-          int.parse(hexPowerConsumption.sublist(0, 2).join());
-      return sum.toString();
-    } catch (e) {
-      return hexPowerConsumption.join();
-    }
+  ///  Extract the time remains for the current execution.
+  static String getRemaining(Uint8List message) {
+    // Convert the relevant part of the message to a hex string
+    String hexRemainingTime = bytesToHex(message).substring(294, 302);
+
+    // Rearrange the hex string and convert it to an integer (time in seconds)
+    int intRemainingTimeSeconds = int.parse(
+        hexRemainingTime.substring(6, 8) +
+            hexRemainingTime.substring(4, 6) +
+            hexRemainingTime.substring(2, 4) +
+            hexRemainingTime.substring(0, 2),
+        radix: 16);
+
+    // Convert seconds to ISO time format
+    return secondsToIsoTime(intRemainingTimeSeconds);
   }
 
   /// Substring like in JavaScript
@@ -400,22 +385,16 @@ abstract class SwitcherApiObject {
     return tempText;
   }
 
-  static String extractMac(List<String> hexSeparatedLetters) {
-    final String macNoColon =
-        hexSeparatedLetters.sublist(160, 172).join().toUpperCase();
-    final String macAddress = '${macNoColon.substring(0, 2)}:'
-        '${macNoColon.substring(2, 4)}:${macNoColon.substring(4, 6)}:'
-        '${macNoColon.substring(6, 8)}:${macNoColon.substring(8, 10)}:'
-        '${macNoColon.substring(10, 12)}';
+  static String getMac(Uint8List message) {
+    // Convert the relevant part of the message to a hex string
+    String hexMac = bytesToHex(message).substring(160, 172).toUpperCase();
 
-    return macAddress;
+    // Format the string as a MAC address
+    return '${hexMac.substring(0, 2)}:${hexMac.substring(2, 4)}:${hexMac.substring(4, 6)}:${hexMac.substring(6, 8)}:${hexMac.substring(8, 10)}:${hexMac.substring(10, 12)}';
   }
 
-  static String extractDeviceName(List<int> data) {
-    return utf8.decode(data.sublist(42, 74)).replaceAll('\u0000', '');
-    // Maybe better name handling will be
-    // this.data_str.substr(38, 32).replace(/[^0-9a-zA-Z_\s]/g, '').replace(/\0/g, '')
-  }
+  static String extractDeviceName(Uint8List message) =>
+      utf8.decode(message.sublist(42, 74)).replaceAll(RegExp(r'\x00+$'), '');
 
   /// Same as Buffer.from(value) in javascript
   /// Not to be confused with Buffer.from(value, 'hex')
@@ -425,47 +404,33 @@ abstract class SwitcherApiObject {
     return intListToHex(encoded).join();
   }
 
-  static String extractShutdownRemainingSeconds(
-    List<String> hexSeparatedLetters,
-  ) {
-    // final String hexAutoShutdownVal =
-    //     hexSeparatedLetters.sublist(310, 318).join();
-    final String timeLeftSeconds =
-        substrLikeInJavaScript(hexSeparatedLetters.join(), 294, 8);
+  static String getAutoShutdown(Uint8List message) {
+    // Convert the relevant part of the message to a hex string
+    String hexAutoShutdownVal = bytesToHex(message).substring(310, 318);
 
-    return int.parse(
-      substrLikeInJavaScript(timeLeftSeconds, 6, 8) +
-          substrLikeInJavaScript(timeLeftSeconds, 4, 6) +
-          substrLikeInJavaScript(timeLeftSeconds, 2, 4) +
-          substrLikeInJavaScript(timeLeftSeconds, 0, 2),
-      radix: 16,
-    ).toString();
+    // Rearrange the hex string and convert it to an integer (time in seconds)
+    int intAutoShutdownValSecs = int.parse(
+        hexAutoShutdownVal.substring(6, 8) +
+            hexAutoShutdownVal.substring(4, 6) +
+            hexAutoShutdownVal.substring(2, 4) +
+            hexAutoShutdownVal.substring(0, 2),
+        radix: 16);
+
+    // Convert seconds to ISO time format
+    return secondsToIsoTime(intAutoShutdownValSecs);
   }
 
-  static String extractDeviceId(List<String> hexSeparatedLetters) {
-    return hexSeparatedLetters.sublist(36, 42).join();
+  // Helper method to convert seconds to ISO time format
+  static String secondsToIsoTime(int seconds) {
+    int hours = seconds ~/ 3600;
+    int minutes = (seconds % 3600) ~/ 60;
+    int remainingSeconds = seconds % 60;
+
+    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
-  static SwitcherDeviceDirection extractSwitchDirection(
-    List<String> hexSeparatedLetters,
-  ) {
-    SwitcherDeviceDirection switcherDeviceState =
-        SwitcherDeviceDirection.cantGetState;
-
-    final String hexModel =
-        substrLikeInJavaScript(hexSeparatedLetters.join(), 274, 4);
-
-    if (hexModel == '0000') {
-      switcherDeviceState = SwitcherDeviceDirection.stop;
-    } else if (hexModel == '0100') {
-      switcherDeviceState = SwitcherDeviceDirection.up;
-    } else if (hexModel == '0001') {
-      switcherDeviceState = SwitcherDeviceDirection.down;
-    } else {
-      logger.w('Switcher direction is not recognized: $hexModel');
-    }
-    return switcherDeviceState;
-  }
+  static String extractDeviceId(Uint8List message) =>
+      bytesToHex(message).substring(36, 42);
 
   Future<Socket> getSocket() async {
     if (socket != null) {
@@ -473,17 +438,14 @@ abstract class SwitcherApiObject {
     }
 
     try {
-      final Socket socket = await _connect(switcherIp, port);
+      final Socket socket = await Socket.connect(switcherIp, port);
       return socket;
     } catch (e) {
       socket = null;
-      logger.e('Error connecting to socket for switcher device: $e');
+      loggerSwitcher.e(
+          'Error connecting to socket for switcher device  type $deviceType Error:\n$e');
       rethrow;
     }
-  }
-
-  Future<Socket> _connect(String ip, int port) async {
-    return Socket.connect(ip, port);
   }
 
   String timerValue(int minutes) {
@@ -508,18 +470,23 @@ class Crc16XmodemWith0x1021 extends ParametricCrc {
         );
 }
 
-enum SwitcherDeviceDirection {
-  cantGetState,
-  stop, // '0000'
-  up, // '0100'
-  down, // '0001'
-}
-
 /// Enum class representing the device's state.
 enum SwitcherDeviceState {
-  cantGetState,
   on, // "01", "on"
   off, // "00", "off"
+}
+
+extension DeviceStateExtension on SwitcherDeviceState {
+  String get value {
+    switch (this) {
+      case SwitcherDeviceState.on:
+        return "01";
+      case SwitcherDeviceState.off:
+        return "00";
+      default:
+        return "";
+    }
+  }
 }
 
 /// Enum for relaying the type of the switcher devices.
@@ -534,4 +501,31 @@ enum SwitcherDevicesTypes {
   switcherBreeze, // BREEZE = "Switcher Breeze", "0e01", 2, DeviceCategory.THERMOSTAT
   switcherRunner, // RUNNER = "Switcher Runner", "0c01", 2, DeviceCategory.SHUTTER
   switcherRunnerMini, // RUNNER_MINI = "Switcher Runner Mini", "0c02", 2, DeviceCategory.SHUTTER
+}
+
+extension SwitcherDevicesTypesExtension on SwitcherDevicesTypes {
+  String get hexRep {
+    switch (this) {
+      case SwitcherDevicesTypes.switcherMini:
+        return "030f";
+      case SwitcherDevicesTypes.switcherPowerPlug:
+        return "01a8";
+      case SwitcherDevicesTypes.switcherTouch:
+        return "030b";
+      case SwitcherDevicesTypes.switcherV2Esp:
+        return "01a7";
+      case SwitcherDevicesTypes.switcherV2qualcomm:
+        return "01a1";
+      case SwitcherDevicesTypes.switcherV4:
+        return "0317";
+      case SwitcherDevicesTypes.switcherBreeze:
+        return "0e01";
+      case SwitcherDevicesTypes.switcherRunner:
+        return "0c01";
+      case SwitcherDevicesTypes.switcherRunnerMini:
+        return "0c02";
+      default:
+        return "";
+    }
+  }
 }

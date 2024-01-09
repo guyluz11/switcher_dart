@@ -1,5 +1,9 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:switcher_dart/src/switcher_api/devices/breeze/switcher_breeze.dart';
 import 'package:switcher_dart/src/switcher_api/devices/switcher_water_heater.dart';
-import 'package:switcher_dart/src/switcher_api/devices/switcher_water_power_plug.dart';
+import 'package:switcher_dart/src/switcher_api/devices/switcher_power_plug.dart';
 import 'package:switcher_dart/src/switcher_api/switcher_api_object.dart';
 import 'package:switcher_dart/src/utils.dart';
 
@@ -11,6 +15,7 @@ abstract class SwitcherOnOffAbstract extends SwitcherApiObject {
     required super.switcherName,
     required super.powerConsumption,
     required super.macAddress,
+    required this.deviceState,
     super.devicePass = '00000000',
     super.phoneId = '0000',
     super.port = SwitcherApiObject.switcherTcpPort,
@@ -18,23 +23,20 @@ abstract class SwitcherOnOffAbstract extends SwitcherApiObject {
     super.lastShutdownRemainingSecondsValue,
     super.remainingTimeForExecution,
     super.log,
-    this.deviceState = SwitcherDeviceState.cantGetState,
   });
 
   factory SwitcherOnOffAbstract.fromHexSeparatedLetters({
-    required List<String> hexSeparatedLetters,
     required String deviceId,
     required String switcherIp,
     required SwitcherDevicesTypes type,
-    required int port,
     required String switcherName,
-    required String powerConsumption,
+    required int powerConsumption,
     required String macAddress,
     required String lastShutdownRemainingSecondsValue,
     required String remainingTimeForExecution,
+    required Uint8List message,
   }) {
-    final SwitcherDeviceState deviceState =
-        extractSwitchState(hexSeparatedLetters);
+    final SwitcherDeviceState deviceState = getThermostatState(message);
     switch (type) {
       case SwitcherDevicesTypes.notRecognized:
         throw 'Unrecognized switcher device';
@@ -45,7 +47,6 @@ abstract class SwitcherOnOffAbstract extends SwitcherApiObject {
           switcherIp: switcherIp,
           switcherName: switcherName,
           powerConsumption: powerConsumption,
-          port: port,
           macAddress: macAddress,
           deviceState: deviceState,
           lastShutdownRemainingSecondsValue: lastShutdownRemainingSecondsValue,
@@ -62,11 +63,23 @@ abstract class SwitcherOnOffAbstract extends SwitcherApiObject {
           switcherIp: switcherIp,
           switcherName: switcherName,
           powerConsumption: powerConsumption,
-          port: port,
           macAddress: macAddress,
           deviceState: deviceState,
           lastShutdownRemainingSecondsValue: lastShutdownRemainingSecondsValue,
           remainingTimeForExecution: remainingTimeForExecution,
+        );
+      case SwitcherDevicesTypes.switcherBreeze:
+        return SwitcherBreeze.fromHexSeparatedLetters(
+          message: message,
+          deviceType: type,
+          deviceId: deviceId,
+          switcherIp: switcherIp,
+          switcherName: switcherName,
+          macAddress: macAddress,
+          powerConsumption: powerConsumption,
+          lastShutdownRemainingSecondsValue: lastShutdownRemainingSecondsValue,
+          remainingTimeForExecution: remainingTimeForExecution,
+          deviceState: deviceState,
         );
       default:
     }
@@ -78,39 +91,46 @@ abstract class SwitcherOnOffAbstract extends SwitcherApiObject {
   static const offValue = '0';
   static const onValue = '1';
 
-  static SwitcherDeviceState extractSwitchState(
-    List<String> hexSeparatedLetters,
-  ) {
-    SwitcherDeviceState switcherDeviceState = SwitcherDeviceState.cantGetState;
-
-    final String hexModel = SwitcherApiObject.substrLikeInJavaScript(
-        hexSeparatedLetters.join(), 266, 4);
-
-    if (hexModel == '0100') {
-      switcherDeviceState = SwitcherDeviceState.on;
-    } else if (hexModel == '0000') {
-      switcherDeviceState = SwitcherDeviceState.off;
-    } else {
-      logger.w('Switcher state is not recognized: $hexModel');
-    }
-    return switcherDeviceState;
+  static SwitcherDeviceState getThermostatState(Uint8List message) {
+    String hexPower = ascii.decode(message.sublist(156, 158));
+    return hexPower == SwitcherDeviceState.off.value
+        ? SwitcherDeviceState.off
+        : SwitcherDeviceState.on;
   }
+
+  // static SwitcherDeviceState extractSwitchState(
+  //   List<String> hexSeparatedLetters,
+  // ) {
+  //   SwitcherDeviceState switcherDeviceState = SwitcherDeviceState.cantGetState;
+
+  //   final String hexModel = SwitcherApiObject.substrLikeInJavaScript(
+  //       hexSeparatedLetters.join(), 266, 4);
+
+  //   if (hexModel == '0100') {
+  //     switcherDeviceState = SwitcherDeviceState.on;
+  //   } else if (hexModel == '0000') {
+  //     switcherDeviceState = SwitcherDeviceState.off;
+  //   } else {
+  //     loggerSwitcher.w('Switcher state is not recognized: $hexModel');
+  //   }
+  //   return switcherDeviceState;
+  // }
 
   Future<void> turnOn({int duration = 0}) async {
     final String offCommand = '${onValue}00${timerValue(duration)}';
 
-    await _runPowerCommand(offCommand);
+    await runPowerCommand(offCommand);
   }
 
   Future<void> turnOff() async {
     const String offCommand = '${offValue}0000000000';
-    await _runPowerCommand(offCommand);
+    await runPowerCommand(offCommand);
   }
 
-  Future<void> _runPowerCommand(String commandType) async {
+  Future<void> runPowerCommand(String commandType) async {
     pSession = await login();
     if (pSession == 'B') {
-      logger.e('Switcher run power command error');
+      loggerSwitcher.e('Switcher run power command error');
       return;
     }
     var data =

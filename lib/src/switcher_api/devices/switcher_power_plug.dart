@@ -9,13 +9,14 @@ class SwitcherPowerPlug extends SwitcherOnOffAbstract {
     required super.switcherName,
     required super.powerConsumption,
     required super.macAddress,
+    required super.deviceState,
     super.devicePass = '00000000',
     super.phoneId = '0000',
-    super.port = SwitcherApiObject.switcherTcpPort,
     super.statusSocket,
     super.lastShutdownRemainingSecondsValue,
     super.remainingTimeForExecution,
     super.log,
-    super.deviceState = SwitcherDeviceState.cantGetState,
-  });
+  }) : super(
+          port: SwitcherApiObject.switcherTcpPort,
+        );
 }

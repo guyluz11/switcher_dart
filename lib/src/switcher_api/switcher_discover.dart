@@ -17,13 +17,17 @@ class SwitcherDiscover {
       await for (final _ in socket20002) {
         final Datagram? datagram = socket20002.receive();
         if (datagram == null) continue;
-        final SwitcherApiObject switcherApiObject =
-            SwitcherApiObject.createWithBytes(datagram);
+        try {
+          final SwitcherApiObject switcherApiObject =
+              SwitcherApiObject.createWithBytes(datagram);
 
-        yield switcherApiObject;
+          yield switcherApiObject;
+        } catch (e) {
+          loggerSwitcher.e(e);
+        }
       }
     } catch (e) {
-      logger.e('Switcher discover devices got and exception: $e');
+      loggerSwitcher.e('Switcher discover devices got and exception: $e');
     }
   }
 
@@ -38,13 +42,17 @@ class SwitcherDiscover {
       await for (final _ in socket20003) {
         final Datagram? datagram = socket20003.receive();
         if (datagram == null) continue;
-        final SwitcherApiObject switcherApiObject =
-            SwitcherApiObject.createWithBytes(datagram);
+        try {
+          final SwitcherApiObject switcherApiObject =
+              SwitcherApiObject.createWithBytes(datagram);
 
-        yield switcherApiObject;
+          yield switcherApiObject;
+        } catch (e) {
+          loggerSwitcher.e(e);
+        }
       }
     } catch (e) {
-      logger.e('Switcher discover devices got and exception: $e');
+      loggerSwitcher.e('Switcher discover devices got and exception: $e');
     }
   }
 }
