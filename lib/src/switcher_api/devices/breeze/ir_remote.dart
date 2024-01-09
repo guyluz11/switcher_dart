@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 class IrRemote {
   final String irSetId;
   final int onOffType;
@@ -10,7 +13,7 @@ class IrRemote {
   });
 
   factory IrRemote.fromJson(Map<String, dynamic> json) {
-    var list = json['IRWaveList'] as List;
+    List list = json['IRWaveList'] as List;
     List<IRWave> irWaveList = list.map((i) => IRWave.fromJson(i)).toList();
     return IrRemote(
       irSetId: json['IRSetID'],
@@ -34,4 +37,30 @@ class IRWave {
       hexCode: json['HexCode'],
     );
   }
+}
+
+Map<String, IrRemote> _irRemoteMap = {};
+
+Future<IrRemote?> getRemoteInfo(String id) async {
+  if (_irRemoteMap.isEmpty) {
+    try {
+      final file = File('lib/src/switcher_api/devices/breeze/irset_db.json');
+      // Read the file
+      final contents = await file.readAsString();
+
+      // Decode the JSON data
+      final Map<String, dynamic> jsonData = jsonDecode(contents);
+
+      // Create an instance of MainObject using the decoded data
+      for (MapEntry<String, dynamic> entry in jsonData.entries) {
+        _irRemoteMap
+            .addEntries([MapEntry(entry.key, IrRemote.fromJson(entry.value))]);
+      }
+    } catch (e) {
+      // Handle errors, e.g., file not found, invalid JSON, etc.
+      print('An error occurred: $e');
+      rethrow; // Or return a default value, depending on your error handling strategy
+    }
+  }
+  return _irRemoteMap[id];
 }

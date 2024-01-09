@@ -86,34 +86,46 @@ class SwitcherBreeze extends SwitcherOnOffAbstract {
   final SwitcherShutterDirection shutterDirection;
   final String remoteId;
 
-  /// The following are remote IDs (list provided by Switcher) which
-  /// behaves differently in commanding their swing.
-  /// with the following IDs, the swing is transmitted as a separate command.
-  List<String> specialSwingCommandRemoteIds() => [
-        'ELEC7022',
-        'ZM079055',
-        'ZM079065',
-        'ZM079049',
-        // TODO: Check if this value should be twice
-        'ZM079065',
-      ];
+  // /// The following are remote IDs (list provided by Switcher) which
+  // /// behaves differently in commanding their swing.
+  // /// with the following IDs, the swing is transmitted as a separate command.
+  // List<String> specialSwingCommandRemoteIds() => [
+  //       'ELEC7022',
+  //       'ZM079055',
+  //       'ZM079065',
+  //       'ZM079049',
+  //       // TODO: Check if this value should be twice
+  //       'ZM079065',
+  //     ];
 
-  @override
-  Future<void> turnOn({int duration = 0}) async {
-    final String command =
-        '${SwitcherOnOffAbstract.onValue}00${timerValue(duration)}';
+  // @override
+  // Future<void> turnOn({int duration = 0}) async {
+  //   final String command =
+  //       '${SwitcherOnOffAbstract.onValue}00${timerValue(duration)}';
 
-    await runPowerCommand(command);
-  }
+  //   await runPowerCommand(command);
+  // }
 
-  @override
-  Future<void> turnOff() async {
-    pSession = await login2();
+  // @override
+  // Future<void> turnOff() async {
+  //   pSession = await login2();
+  //   IrRemote? irRemote = await getRemoteInfo(remoteId);
+  //   if (irRemote == null) {
+  //     loggerSwitcher.e('Can\'t be found, please check the code');
+  //     return;
+  //   }
 
-    // const String command = '00000000${SwitcherOnOffAbstract.offValue}0000000000';
-    String command = '00000000${'off'}0000000000';
-    await runPowerCommand(command);
-  }
+  //   // TODO: incomplete 'RC72|21|32|26|4C|98|S|22|03|7272[22]|9014000080'
+
+  //   final IRWave irWave =
+  //       irRemote.irWaveList.firstWhere((element) => element.key == 'off');
+  //   String command = "${irWave.para}|${irWave.hexCode}";
+
+  //   // const String command = '00000000${SwitcherOnOffAbstract.offValue}0000000000';
+  //   // String fullCommand = '00000000${'off'}0000000000';
+
+  //   await runPowerCommand(command);
+  // }
 
   /// format values are local session id, timestamp, device id, phone id, device-
   /// password, command length, command
@@ -193,9 +205,19 @@ class SwitcherBreeze extends SwitcherOnOffAbstract {
     );
   }
 
-  static String getThermostatRemoteId(Uint8List message) =>
-      SwitcherApiObject.bytesToHex(message.sublist(84, 92))
-          .replaceAll('\x00', '');
+  static String getThermostatRemoteId(Uint8List message)
+      // TODO: Check if this ok to use it like this
+      =>
+      getStringFromUint8List(message, 143, 8);
+
+  static String getStringFromUint8List(Uint8List list, int start, int length) {
+    // Ensure the start and length are within the bounds of the list
+    if (start < 0 || length < 0 || start + length > list.length) {
+      return ''; // Return an empty string if the range is invalid
+    }
+
+    return String.fromCharCodes(list.sublist(start, start + length));
+  }
 
   static int getShutterPosition(String hexResponse) =>
       int.parse(hexResponse.substring(152, 154), radix: 16);
